@@ -5,12 +5,99 @@ using System.Net.Sockets;
 using System.Diagnostics;
 using System.Threading.Tasks;
 
+// ==================== 메인 프로그램 ====================
+public class Program
+{
+    private static string IP = "";
+    public static async Task Main(string[] args)
+    {
+        Console.WriteLine("===== 파일 전송 테스트 =====\n");
+
+        Console.WriteLine("프로토콜:");
+        Console.WriteLine("1: TCP");
+        Console.WriteLine("2: UDP");
+        Console.Write("선택: ");
+        string protocolChoice = Console.ReadLine();
+
+        Console.WriteLine("\n역할:");
+        Console.WriteLine("1: 서버");
+        Console.WriteLine("2: 클라이언트");
+        Console.Write("선택: ");
+        string roleChoice = Console.ReadLine();
+
+        Console.WriteLine();
+
+        if (protocolChoice == "1") // TCP
+        {
+            if (roleChoice == "1")
+            {
+                TcpServer server = new TcpServer();
+                await server.StartServer(5000);
+            }
+            else if (roleChoice == "2")
+            {
+                TcpClientHandler client = new TcpClientHandler();
+
+                Console.Write("서버 IP (기본 127.0.0.1): ");
+                string ip = Console.ReadLine();
+                if (string.IsNullOrEmpty(ip)) ip = "127.0.0.1";
+
+                await client.ConnectAsync(ip, 5000);
+
+                Console.Write("파일 경로: ");
+                string filePath = Console.ReadLine();
+
+                Console.Write("Delay (ms, 기본 0): ");
+                string delayInput = Console.ReadLine();
+                int delay = string.IsNullOrEmpty(delayInput) ? 0 : int.Parse(delayInput);
+
+                await client.SendFileAsync(filePath, delay);
+                Console.WriteLine("종료: 아무 키나...");
+                Console.ReadKey();
+                client.Disconnect();
+            }
+        }
+        else if (protocolChoice == "2") // UDP
+        {
+            if (roleChoice == "1")
+            {
+                UdpServer server = new UdpServer();
+                await server.StartServer(5000);
+            }
+            else if (roleChoice == "2")
+            {
+                UdpClientHandler client = new UdpClientHandler();
+
+                Console.Write("서버 IP (기본 127.0.0.1): ");
+                string ip = Console.ReadLine();
+                if (string.IsNullOrEmpty(ip)) ip = "127.0.0.1";
+
+                await client.ConnectAsync(ip, 5000);
+
+                Console.Write("파일 경로: ");
+                string filePath = Console.ReadLine();
+
+                Console.Write("Delay (ms, 기본 0): ");
+                string delayInput = Console.ReadLine();
+                int delay = string.IsNullOrEmpty(delayInput) ? 0 : int.Parse(delayInput);
+
+                await client.SendFileAsync(filePath, delay);
+
+                Console.WriteLine("종료: 아무 키나...");
+                Console.ReadKey();
+                client.Disconnect();
+            }
+        }
+    }
+}
+
+
+#region TCP
 // ==================== TCP 서버 ====================
 public class TcpServer
 {
     private TcpListener listener;
     private bool isRunning;
-
     public async Task StartServer(int port)
     {
         try
@@ -54,6 +141,7 @@ public class TcpServer
                 }
 
                 await fileStream.WriteAsync(buffer, 0, bytesRead);
+                await stream.WriteAsync(buffer, 0, bytesRead); // 에코 백
                 totalBytesReceived += bytesRead;
 
                 if (totalBytesReceived % 5000000 < 8192)
@@ -93,6 +181,10 @@ public class TcpClientHandler
             client = new TcpClient();
             await client.ConnectAsync(serverIp, port);
             stream = client.GetStream();
+            //_ : 언더바는 반환값 무시
+            //await : 비동기 작업 완료 대기
+            _ = ReceiveDataAsync();//서버로부터 에코백 받기 
+
             Console.WriteLine($"TCP 서버 연결: {serverIp}:{port}\n");
             return true;
         }
@@ -156,13 +248,53 @@ public class TcpClientHandler
         }
     }
 
+    public async Task ReceiveDataAsync()
+    {
+        string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string savePath = $"tcp_echo_received_{timestamp}.bin";
+        using FileStream fileStream = new FileStream(savePath, FileMode.Create, FileAccess.Write);
+
+        byte[] buffer = new byte[8192];
+        long totalBytes = 0;
+        Stopwatch sw = Stopwatch.StartNew();
+
+        try
+        {
+            while (true)
+            {
+                int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                if (bytesRead == 0)
+                {
+                    Console.WriteLine("\n서버에서 연결 종료됨");
+                    break;
+                }
+
+                await fileStream.WriteAsync(buffer, 0, bytesRead);
+                totalBytes += bytesRead;
+            }
+
+            sw.Stop();
+            Console.WriteLine($"\n 에코백 저장 완료: {savePath}");
+            Console.WriteLine($" 수신 크기: {totalBytes / (1024.0 * 1024.0):F2} MB");
+            Console.WriteLine($" 시간: {sw.Elapsed.TotalSeconds:F2}초");
+            Console.WriteLine($" 속도: {totalBytes / (1024.0 * 1024.0) / sw.Elapsed.TotalSeconds:F2} MB/s\n");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"수신 오류: {ex.Message}");
+        }
+    }
+
     public void Disconnect()
     {
         stream?.Close();
         client?.Close();
     }
 }
+#endregion
 
+
+          #region UDP
 // ==================== UDP 서버 ====================
 public class UdpServer
 {
@@ -221,7 +353,7 @@ public class UdpServer
                 }
             }
 
-            sw.Stop();
+            sw.Stop();    
             Console.WriteLine($"\n패킷: {packetCount:N0}");
             Console.WriteLine($"크기: {totalBytesReceived / (1024.0 * 1024.0):F2} MB");
             Console.WriteLine($"시간: {sw.Elapsed.TotalSeconds:F2}초");
@@ -322,89 +454,4 @@ public class UdpClientHandler
         udpClient?.Close();
     }
 }
-
-// ==================== 메인 프로그램 ====================
-public class Program
-{
-    public static async Task Main(string[] args)
-    {
-        Console.WriteLine("===== 파일 전송 테스트 =====\n");
-
-        Console.WriteLine("프로토콜:");
-        Console.WriteLine("1: TCP");
-        Console.WriteLine("2: UDP");
-        Console.Write("선택: ");
-        string protocolChoice = Console.ReadLine();
-
-        Console.WriteLine("\n역할:");
-        Console.WriteLine("1: 서버");
-        Console.WriteLine("2: 클라이언트");
-        Console.Write("선택: ");
-        string roleChoice = Console.ReadLine();
-
-        Console.WriteLine();
-
-        if (protocolChoice == "1") // TCP
-        {
-            if (roleChoice == "1")
-            {
-                TcpServer server = new TcpServer();
-                await server.StartServer(5000);
-            }
-            else if (roleChoice == "2")
-            {
-                TcpClientHandler client = new TcpClientHandler();
-
-                Console.Write("서버 IP (기본 192.168.51.100): ");
-                string ip = Console.ReadLine();
-                if (string.IsNullOrEmpty(ip)) ip = "192.168.51.100";
-
-                await client.ConnectAsync(ip, 5000);
-
-                Console.Write("파일 경로: ");
-                string filePath = Console.ReadLine();
-
-                Console.Write("Delay (ms, 기본 0): ");
-                string delayInput = Console.ReadLine();
-                int delay = string.IsNullOrEmpty(delayInput) ? 0 : int.Parse(delayInput);
-
-                await client.SendFileAsync(filePath, delay);
-
-                Console.WriteLine("종료: 아무 키나...");
-                Console.ReadKey();
-                client.Disconnect();
-            }
-        }
-        else if (protocolChoice == "2") // UDP
-        {
-            if (roleChoice == "1")
-            {
-                UdpServer server = new UdpServer();
-                await server.StartServer(5000);
-            }
-            else if (roleChoice == "2")
-            {
-                UdpClientHandler client = new UdpClientHandler();
-
-                Console.Write("서버 IP (기본 192.168.51.100): ");
-                string ip = Console.ReadLine();
-                if (string.IsNullOrEmpty(ip)) ip = "192.168.51.100";
-
-                await client.ConnectAsync(ip, 5000);
-
-                Console.Write("파일 경로: ");
-                string filePath = Console.ReadLine();
-
-                Console.Write("Delay (ms, 기본 0): ");
-                string delayInput = Console.ReadLine();
-                int delay = string.IsNullOrEmpty(delayInput) ? 0 : int.Parse(delayInput);
-
-                await client.SendFileAsync(filePath, delay);
-
-                Console.WriteLine("종료: 아무 키나...");
-                Console.ReadKey();
-                client.Disconnect();
-            }
-        }
-    }
-}
+#endregion
